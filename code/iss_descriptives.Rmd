@@ -1,0 +1,152 @@
+---
+title: "ISS descriptives"
+author: "ZH"
+date: "2026-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+```
+
+
+```{r ISS_2023}
+
+# load data
+iss2023 <- 
+  read.csv(here("data", "iss", "H20231491data.csv")) |>
+  select(nn,
+         Gil,
+         MatzavTaasukaM_C,
+         PehamimShimushInt, 
+         MachshevAvoda, 
+         MachshevHipusMeida, 
+         MachshevEmail, 
+         MachshevWhatsApp, 
+         MachshevChat, 
+         MachshevBankim, 
+         MachshevHoradatKvazim, 
+         MachshevKniyot, 
+         MachshevGov, 
+         MachshevVideo)
+         
+# check obs
+iss2023 |> 
+  mutate(internet_for_all_use = as.numeric(PehamimShimushInt == 1 &
+                                             MachshevAvoda == 1 &
+                                             MachshevHipusMeida == 1 &
+                                             MachshevEmail == 1 & 
+                                             MachshevWhatsApp == 1 &
+                                             MachshevChat == 1 &
+                                             MachshevBankim == 1 &
+                                             MachshevHoradatKvazim == 1 &
+                                             MachshevKniyot == 1 &
+                                             MachshevGov == 1 &
+                                             MachshevVideo == 1)) |> 
+  summarise(
+    all.obs = n(),
+    all.pop_estimate = sum(nn),
+    age.obs = sum(as.numeric(Gil >= 2 & Gil <= 9)),
+    age.pop_estimate = sum(as.numeric(Gil >= 2 & Gil <= 9)*nn),
+    labor_force.obs = sum(as.numeric(Gil >= 2 & Gil <= 9 & MatzavTaasukaM_C != 3)),
+    labor_force.pop_estimate = sum(as.numeric(Gil >= 2 & Gil <= 9 & MatzavTaasukaM_C != 3)*nn),
+    internet_daily.obs = sum(as.numeric(Gil >= 2 & Gil <= 9 & MatzavTaasukaM_C != 3 & PehamimShimushInt == 1)),
+    internet_daily.pop_estimate = sum(as.numeric(Gil >= 2 & Gil <= 9 & MatzavTaasukaM_C != 3 & PehamimShimushInt == 1)*nn),
+    internet_all_use.obs = sum(as.numeric(Gil >= 2 & Gil <= 9 & MatzavTaasukaM_C != 3 & internet_for_all_use == 1)),
+    internet_all_use.pop_estimate = sum(as.numeric(Gil >= 2 & Gil <= 9 & MatzavTaasukaM_C != 3 & internet_for_all_use == 1)*nn)
+  ) |> 
+  pivot_longer(
+    cols = everything(),
+    names_sep = "\\.",
+    names_to = c("criteria", "variable")
+  ) |> 
+  pivot_wider(names_from = "variable", values_from = "value")
+```
+
+``` {r ISS_cross_year}
+
+# load data ----
+# data files
+iss_data <- 
+  list("2019" = "H20191424data.csv",
+       "2020" = "H20201453data.csv",
+       "2021" = "H20211461data.csv",
+       "2022" = "H20221482data.csv",
+       "2023" = "H20231491data.csv",
+       "2024" = "H20241501data.csv")
+
+# read data
+iss_data <- 
+  map(iss_data, ~ read.csv(here("data", "iss", .x))) |> 
+  map(~ select(.x,
+               any_of(c("nn",
+                        "Gil",
+                        "MatzavTaasukaM_C",
+                        "HachnasaAvoda",
+                        "AvodaHaimIzun_wp",
+                        "MerutzeAvoda_wp",
+                        "PehamimShimushInt",
+                        "MachshevAvoda",
+                        "MachshevHipusMeida",
+                        "MachshevEmail",
+                        "MachshevChat",
+                        "MachshevChat_C",
+                        "MachshevHoradatKvazim",
+                        "MachshevKniyot",
+                        "MachshevGov",
+                        "MachshevVideo")))) 
+# rename
+col_to_change <- colnames(iss_data[["2020"]]) == "MachshevChat_C"
+colnames(iss_data[["2020"]])[col_to_change] <- "MachshevChat"
+rm(col_to_change)
+
+# consolidate to one table 
+iss_data <- bind_rows(iss_data,.id = "year")
+
+# filter to by age, LF participation, daily use
+iss_data <- 
+  iss_data |> 
+  filter(Gil >= 2 & Gil <= 9, MatzavTaasukaM_C != 3, PehamimShimushInt == 1) |> 
+  mutate(internet_for_all_use = as.numeric(MachshevAvoda == 1 &
+                                             MachshevHipusMeida == 1 &
+                                             MachshevEmail == 1 & 
+                                             MachshevChat == 1 &
+                                             MachshevHoradatKvazim == 1 &
+                                             MachshevKniyot == 1 &
+                                             MachshevGov == 1 &
+                                             MachshevVideo == 1) |> factor(levels = 0:1,
+                                                                           labels = c("non intensive user",
+                                                                                      "intesive user")),
+         year = as.numeric(year))
+
+# fix NAs
+iss_data <- 
+  iss_data |> 
+  mutate(
+    HachnasaAvoda = if_else(HachnasaAvoda <= 11, HachnasaAvoda, NA),
+    AvodaHaimIzun_wp = if_else(AvodaHaimIzun_wp <= 4, AvodaHaimIzun_wp, NA),
+    MerutzeAvoda_wp = if_else(MerutzeAvoda_wp <= 4, MerutzeAvoda_wp, NA)
+  )
+
+# analysis per year ----
+iss_data |> 
+  group_by(year, internet_for_all_use) |> 
+  summarise(across(c("HachnasaAvoda", "AvodaHaimIzun_wp", "MerutzeAvoda_wp"),
+                   list(mean = ~ weighted.mean(.x, w = nn, na.rm = T),
+                          median = ~ ggstats::weighted.median(.x, w = nn, na.rm = T)),
+                   .names = "{col}.{fn}")) |> 
+  ungroup() |> 
+  pivot_longer(cols = -c("year", "internet_for_all_use"),
+               names_sep = "\\.",
+               names_to = c("metric", "variable")) |> 
+  ggplot(aes(year, value, colour = internet_for_all_use, linetype = variable)) +
+  geom_vline(xintercept = 2022) +
+  geom_line() +
+  facet_wrap(~metric, ncol = 1, scale = "free_y")
+```
